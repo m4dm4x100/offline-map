@@ -15,22 +15,16 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
-import org.maplibre.android.style.layers.LineLayer
-import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
-import org.maplibre.android.style.layers.PropertyFactory.fillColor
-import org.maplibre.android.style.layers.PropertyFactory.lineColor
-import org.maplibre.android.style.layers.PropertyFactory.lineWidth
 import org.maplibre.android.style.sources.GeoJsonSource
-import org.maplibre.android.style.sources.VectorSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.Point
 import java.io.File
@@ -44,10 +38,6 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private var firstFix = true
 
     private val indiaCenter = LatLng(22.5, 79.0)
-    private val indiaBounds = LatLngBounds.Builder()
-        .include(LatLng(35.7, 68.0))
-        .include(LatLng(6.0, 97.5))
-        .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,11 +54,10 @@ class MainActivity : AppCompatActivity(), LocationListener {
             textSize = 12f
             setPadding(16, 10, 16, 10)
         }
-        val statusParams = FrameLayout.LayoutParams(-2, -2).apply {
+        root.addView(status, FrameLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             topMargin = 28
-        }
-        root.addView(status, statusParams)
+        })
         setContentView(root)
 
         mapView.onCreate(savedInstanceState)
@@ -79,7 +68,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
             )
             val mapFile = copyBundledMap()
             mapLibreMap.setStyle(buildStyle(mapFile)) { style ->
-                addMapLayers(style)
+                addGpsLayer(style)
                 startGps()
             }
         }
@@ -101,10 +90,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
         {
           "version": 8,
           "sources": {
-            "india": {
-              "type": "vector",
-              "url": "pmtiles://file://$escaped"
-            }
+            "india": {"type":"vector","url":"pmtiles://file://$escaped"}
           },
           "layers": [
             {"id":"background","type":"background","paint":{"background-color":"#e8edf1"}},
@@ -113,17 +99,18 @@ class MainActivity : AppCompatActivity(), LocationListener {
             {"id":"roads","type":"line","source":"india","source-layer":"transportation","paint":{"line-color":"#f8f8f8","line-width":["interpolate",["linear"],["zoom"],4,0.4,8,1.2,12,3.2,15,7]}},
             {"id":"roads-major","type":"line","source":"india","source-layer":"transportation","filter":["in","class","motorway","trunk","primary","secondary"],"paint":{"line-color":"#e49a4d","line-width":["interpolate",["linear"],["zoom"],4,0.8,8,2.0,12,4.0,15,8]}},
             {"id":"waterway","type":"line","source":"india","source-layer":"waterway","paint":{"line-color":"#8bbfdf","line-width":["interpolate",["linear"],["zoom"],5,0.5,12,2]}},
-            {"id":"buildings","type":"fill","source":"india","source-layer":"building","minzoom":13,"paint":{"fill-color":"#d8d2c9","fill-opacity":0.75}},
-            {"id":"location","type":"circle","source":"user-location","paint":{"circle-color":"#2563eb","circle-radius":8,"circle-stroke-color":"#ffffff","circle-stroke-width":3}}
+            {"id":"buildings","type":"fill","source":"india","source-layer":"building","minzoom":13,"paint":{"fill-color":"#d8d2c9","fill-opacity":0.75}}
           ]
         }
         """.trimIndent()
     }
 
-    private fun addMapLayers(style: Style) {
-        locationSource = GeoJsonSource("user-location", Feature.fromGeometry(Point.fromLngLat(79.0, 22.5)))
+    private fun addGpsLayer(style: Style) {
+        locationSource = GeoJsonSource(
+            "user-location",
+            Feature.fromGeometry(Point.fromLngLat(indiaCenter.longitude, indiaCenter.latitude))
+        )
         style.addSource(locationSource!!)
-        // Keep the live GPS marker above all bundled map data.
         style.addLayer(
             CircleLayer("user-location-layer", "user-location").withProperties(
                 circleColor("#2563EB"),
@@ -150,15 +137,15 @@ class MainActivity : AppCompatActivity(), LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
-        val point = Point.fromLngLat(location.longitude, location.latitude)
-        locationSource?.setGeoJson(Feature.fromGeometry(point))
+        locationSource?.setGeoJson(
+            Feature.fromGeometry(Point.fromLngLat(location.longitude, location.latitude))
+        )
         status.text = "  OFFLINE • GPS ${"%.5f".format(location.latitude)}, ${"%.5f".format(location.longitude)}  "
         if (firstFix) {
             firstFix = false
             map?.animateCamera(
-                org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
-                    LatLng(location.latitude, location.longitude), 15.0
-                ), 800
+                CameraUpdateFactory.newLatLngZoom(LatLng(location.latitude, location.longitude), 15.0),
+                800
             )
         }
     }
