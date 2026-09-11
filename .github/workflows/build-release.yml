@@ -79,20 +79,23 @@ jobs:
           set -euo pipefail
           echo 'APK outputs:'
           find app/build/outputs -type f -name '*.apk' -print -exec ls -lh {} \;
-          APK=$(find app/build/outputs -type f -name '*.apk' -print -quit)
+          APK=$(find app/build/outputs -type f -name '*release*.apk' -print -quit)
           if [ -z "$APK" ]; then
-            echo 'ERROR: No APK was produced.'
+            echo 'ERROR: No release APK was produced.'
             exit 1
           fi
           APK="$(realpath "$APK")"
           echo "APK=$APK" >> "$GITHUB_ENV"
           echo "APK: $APK"
           stat "$APK"
+
           APKANALYZER=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/apkanalyzer' -type f | sort -V | tail -1)
-          if [ -z "$APKANALYZER" ]; then
-            echo 'ERROR: apkanalyzer was not found.'
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -path '*/apksigner' -type f | sort -V | tail -1)
+          if [ -z "$APKANALYZER" ] || [ -z "$APKSIGNER" ]; then
+            echo 'ERROR: Android APK verification tools were not found.'
             exit 1
           fi
+
           echo 'Permissions in APK:'
           "$APKANALYZER" manifest permissions "$APK"
           if "$APKANALYZER" manifest permissions "$APK" | grep -q '^android.permission.INTERNET$'; then
@@ -100,6 +103,10 @@ jobs:
             exit 1
           fi
           echo 'PASS: APK contains no INTERNET permission.'
+
+          echo 'APK signature:'
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo 'PASS: APK signature verification succeeded.'
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -117,4 +124,4 @@ jobs:
           gh release create "$TAG" \
             "$APK" \
             --title "India Offline Map $TAG" \
-            --notes "GPS-only offline India map. All map data is bundled in the APK; the final APK is verified to contain no INTERNET permission. Map data: OpenStreetMap contributors / Geofabrik."
+            --notes "GPS-only offline India map. All map data is bundled in the APK; the final APK is verified to be signed and to contain no INTERNET permission. Map data: OpenStreetMap contributors / Geofabrik."
