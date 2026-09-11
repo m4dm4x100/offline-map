@@ -73,10 +73,19 @@ jobs:
       - name: Build release APK
         run: gradle --no-daemon --stacktrace assembleRelease
 
-      - name: Verify APK has no network permission
+      - name: Locate and verify APK
         shell: bash
         run: |
-          APK="$(realpath app/build/outputs/apk/release/app-release.apk)"
+          set -euo pipefail
+          echo 'APK outputs:'
+          find app/build/outputs -type f -name '*.apk' -print -exec ls -lh {} \;
+          APK=$(find app/build/outputs -type f -name '*.apk' -print -quit)
+          if [ -z "$APK" ]; then
+            echo 'ERROR: No APK was produced.'
+            exit 1
+          fi
+          APK="$(realpath "$APK")"
+          echo "APK=$APK" >> "$GITHUB_ENV"
           echo "APK: $APK"
           stat "$APK"
           APKANALYZER=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/apkanalyzer' -type f | sort -V | tail -1)
@@ -84,20 +93,19 @@ jobs:
             echo 'ERROR: apkanalyzer was not found.'
             exit 1
           fi
-          echo "Permissions in APK:"
+          echo 'Permissions in APK:'
           "$APKANALYZER" manifest permissions "$APK"
           if "$APKANALYZER" manifest permissions "$APK" | grep -q '^android.permission.INTERNET$'; then
             echo 'ERROR: INTERNET permission was merged into the APK.'
             exit 1
           fi
           echo 'PASS: APK contains no INTERNET permission.'
-          ls -lh "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: india-offline-map-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          path: ${{ env.APK }}
           if-no-files-found: error
           retention-days: 14
 
@@ -107,6 +115,6 @@ jobs:
         run: |
           TAG="v1.0.${{ github.run_number }}"
           gh release create "$TAG" \
-            app/build/outputs/apk/release/app-release.apk \
+            "$APK" \
             --title "India Offline Map $TAG" \
             --notes "GPS-only offline India map. All map data is bundled in the APK; the final APK is verified to contain no INTERNET permission. Map data: OpenStreetMap contributors / Geofabrik."
