@@ -76,11 +76,17 @@ jobs:
       - name: Verify APK has no network permission
         shell: bash
         run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
-          SDK_AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          APK="$(realpath app/build/outputs/apk/release/app-release.apk)"
+          echo "APK: $APK"
+          stat "$APK"
+          APKANALYZER=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/apkanalyzer' -type f | sort -V | tail -1)
+          if [ -z "$APKANALYZER" ]; then
+            echo 'ERROR: apkanalyzer was not found.'
+            exit 1
+          fi
           echo "Permissions in APK:"
-          "$SDK_AAPT" dump permissions "$APK"
-          if "$SDK_AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+          "$APKANALYZER" manifest permissions "$APK"
+          if "$APKANALYZER" manifest permissions "$APK" | grep -q '^android.permission.INTERNET$'; then
             echo 'ERROR: INTERNET permission was merged into the APK.'
             exit 1
           fi
