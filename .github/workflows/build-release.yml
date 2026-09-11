@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  GRADLE_OPTS: -Xmx6g -Dfile.encoding=UTF-8
+
 jobs:
   build-release:
     runs-on: ubuntu-latest
@@ -57,11 +60,12 @@ jobs:
             --threads 4
           ls -lh data/map/india.pmtiles
 
-      - name: Copy map into APK assets
+      - name: Split map into APK-safe asset chunks
         run: |
           mkdir -p app/src/main/assets
-          cp data/map/india.pmtiles app/src/main/assets/india.pmtiles
-          rm -f data/map/india-latest.osm.pbf
+          split -b 64M -d -a 3 data/map/india.pmtiles app/src/main/assets/india.pmtiles.part
+          ls -lh app/src/main/assets/
+          rm -f data/map/india.pmtiles data/map/india-latest.osm.pbf
           rm -f data/map/config.json data/map/process.lua
           rm -rf data/store
           df -h
