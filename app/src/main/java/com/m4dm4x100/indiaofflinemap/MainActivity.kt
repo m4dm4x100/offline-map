@@ -77,8 +77,15 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private fun copyBundledMap(): File {
         val target = File(filesDir, "india.pmtiles")
         if (!target.exists() || target.length() == 0L) {
-            assets.open("india.pmtiles").use { input ->
-                target.outputStream().use { output -> input.copyTo(output, 1024 * 1024) }
+            val parts = assets.list("")?.filter { it.startsWith("india.pmtiles.part") }?.sorted()
+                ?: emptyList()
+            require(parts.isNotEmpty()) { "Offline map data is missing" }
+            target.outputStream().buffered().use { output ->
+                parts.forEach { part ->
+                    assets.open(part).buffered().use { input ->
+                        input.copyTo(output, 1024 * 1024)
+                    }
+                }
             }
         }
         return target
