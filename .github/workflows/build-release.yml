@@ -31,6 +31,8 @@ jobs:
       - name: Prepare workspace
         run: |
           mkdir -p data/map data/store
+          cp map-data/config.json data/map/config.json
+          cp map-data/process.lua data/map/process.lua
           df -h
 
       - name: Download current India OpenStreetMap extract
@@ -60,6 +62,7 @@ jobs:
           mkdir -p app/src/main/assets
           cp data/map/india.pmtiles app/src/main/assets/india.pmtiles
           rm -f data/map/india-latest.osm.pbf
+          rm -f data/map/config.json data/map/process.lua
           rm -rf data/store
           df -h
 
