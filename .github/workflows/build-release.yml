@@ -1,0 +1,99 @@
+name: Build India Offline Map APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p data/map data/store
+          df -h
+
+      - name: Download current India OpenStreetMap extract
+        run: |
+          curl -L --fail --retry 6 --retry-delay 5 \
+            -o data/map/india-latest.osm.pbf \
+            https://download.geofabrik.de/asia/india-latest.osm.pbf
+          ls -lh data/map/india-latest.osm.pbf
+
+      - name: Generate offline vector map
+        run: |
+          docker pull ghcr.io/systemed/tilemaker:master
+          docker run --rm \
+            -v "$PWD/data/map:/data/map" \
+            -v "$PWD/data/store:/data/store" \
+            ghcr.io/systemed/tilemaker:master \
+            /data/map/india-latest.osm.pbf \
+            --output /data/map/india.pmtiles \
+            --config /data/map/config.json \
+            --process /data/map/process.lua \
+            --store /data/store \
+            --threads 4
+          ls -lh data/map/india.pmtiles
+
+      - name: Copy map into APK assets
+        run: |
+          mkdir -p app/src/main/assets
+          cp data/map/india.pmtiles app/src/main/assets/india.pmtiles
+          rm -f data/map/india-latest.osm.pbf
+          rm -rf data/store
+          df -h
+
+      - name: Build release APK
+        run: gradle --no-daemon --stacktrace assembleRelease
+
+      - name: Verify APK has no network permission
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          SDK_AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          echo "Permissions in APK:"
+          "$SDK_AAPT" dump permissions "$APK"
+          if "$SDK_AAPT" dump permissions "$APK" | grep -q 'android.permission.INTERNET'; then
+            echo 'ERROR: INTERNET permission was merged into the APK.'
+            exit 1
+          fi
+          echo 'PASS: APK contains no INTERNET permission.'
+          ls -lh "$APK"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: india-offline-map-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" \
+            app/build/outputs/apk/release/app-release.apk \
+            --title "India Offline Map $TAG" \
+            --notes "GPS-only offline India map. All map data is bundled in the APK; the final APK is verified to contain no INTERNET permission. Map data: OpenStreetMap contributors / Geofabrik."
