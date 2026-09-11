@@ -28,6 +28,7 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.Point
 import java.io.File
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity(), LocationListener {
     private lateinit var mapView: MapView
@@ -36,6 +37,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private var map: MapLibreMap? = null
     private var locationSource: GeoJsonSource? = null
     private var firstFix = true
+    private val ioExecutor = Executors.newSingleThreadExecutor()
 
     private val indiaCenter = LatLng(22.5, 79.0)
 
@@ -48,9 +50,9 @@ class MainActivity : AppCompatActivity(), LocationListener {
         root.addView(mapView, FrameLayout.LayoutParams(-1, -1))
 
         status = TextView(this).apply {
-            text = "  OFFLINE • GPS ONLY  "
+            text = "  OFFLINE • PREPARING MAP…  "
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.argb(210, 16, 24, 32))
+            setBackgroundColor(Color.argb(220, 16, 24, 32))
             textSize = 12f
             setPadding(16, 10, 16, 10)
         }
@@ -66,29 +68,73 @@ class MainActivity : AppCompatActivity(), LocationListener {
             mapLibreMap.setCameraPosition(
                 CameraPosition.Builder().target(indiaCenter).zoom(4.2).build()
             )
-            val mapFile = copyBundledMap()
-            mapLibreMap.setStyle(buildStyle(mapFile)) { style ->
-                addGpsLayer(style)
-                startGps()
+            prepareMapInBackground()
+        }
+    }
+
+    private fun prepareMapInBackground() {
+        status.text = "  OFFLINE • LOADING LOCAL MAP…  "
+        ioExecutor.execute {
+            try {
+                val mapFile = copyBundledMapIfNeeded()
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    try {
+                        map?.setStyle(buildStyle(mapFile)) { style ->
+                            addGpsLayer(style)
+                            startGps()
+                        }
+                    } catch (t: Throwable) {
+                        showStartupError("Map renderer failed: ${t.message ?: "unknown error"}")
+                    }
+                }
+            } catch (t: Throwable) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        showStartupError("Offline map could not be prepared: ${t.message ?: "unknown error"}")
+                    }
+                }
             }
         }
     }
 
-    private fun copyBundledMap(): File {
+    private fun copyBundledMapIfNeeded(): File {
         val target = File(filesDir, "india.pmtiles")
-        if (!target.exists() || target.length() == 0L) {
-            val parts = assets.list("")?.filter { it.startsWith("india.pmtiles.part") }?.sorted()
-                ?: emptyList()
-            require(parts.isNotEmpty()) { "Offline map data is missing" }
-            target.outputStream().buffered().use { output ->
-                parts.forEach { part ->
+        val parts = assets.list("")?.filter { it.startsWith("india.pmtiles.part") }?.sorted()
+            ?: emptyList()
+        require(parts.isNotEmpty()) { "Bundled India map data is missing" }
+
+        val expectedSize = parts.sumOf { part ->
+            assets.open(part).use { stream -> stream.available().toLong() }
+        }
+        if (target.exists() && target.length() == expectedSize) return target
+
+        val temp = File(filesDir, "india.pmtiles.tmp")
+        if (temp.exists()) temp.delete()
+
+        try {
+            temp.outputStream().buffered().use { output ->
+                parts.forEachIndexed { index, part ->
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = "  OFFLINE • COPYING MAP ${index + 1}/${parts.size}…  "
+                        }
+                    }
                     assets.open(part).buffered().use { input ->
                         input.copyTo(output, 1024 * 1024)
                     }
                 }
             }
+            require(temp.length() == expectedSize) {
+                "Map copy incomplete (${temp.length()} / $expectedSize bytes)"
+            }
+            if (target.exists()) target.delete()
+            require(temp.renameTo(target)) { "Could not finalize offline map" }
+            return target
+        } catch (t: Throwable) {
+            temp.delete()
+            throw t
         }
-        return target
     }
 
     private fun buildStyle(mapFile: File): String {
@@ -134,13 +180,24 @@ class MainActivity : AppCompatActivity(), LocationListener {
             status.text = "  OFFLINE • GRANT GPS ACCESS  "
             return
         }
-        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            status.text = "  OFFLINE • GPS IS OFF  "
-            return
+        try {
+            if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                status.text = "  OFFLINE • GPS IS OFF  "
+                return
+            }
+            status.text = "  OFFLINE • WAITING FOR GPS  "
+            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this, mainLooper)
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { onLocationChanged(it) }
+        } catch (t: SecurityException) {
+            status.text = "  OFFLINE • GPS PERMISSION REQUIRED  "
+        } catch (t: RuntimeException) {
+            status.text = "  OFFLINE • GPS UNAVAILABLE  "
         }
-        status.text = "  OFFLINE • WAITING FOR GPS  "
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 1f, this, mainLooper)
-        locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { onLocationChanged(it) }
+    }
+
+    private fun showStartupError(message: String) {
+        status.text = "  OFFLINE • MAP ERROR  "
+        android.util.Log.e("IndiaOfflineMap", message)
     }
 
     override fun onLocationChanged(location: Location) {
@@ -163,7 +220,10 @@ class MainActivity : AppCompatActivity(), LocationListener {
     }
 
     override fun onDestroy() {
-        if (::locationManager.isInitialized) locationManager.removeUpdates(this)
+        if (::locationManager.isInitialized) {
+            try { locationManager.removeUpdates(this) } catch (_: Exception) { }
+        }
+        ioExecutor.shutdownNow()
         mapView.onDestroy()
         super.onDestroy()
     }
