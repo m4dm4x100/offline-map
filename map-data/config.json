@@ -1,0 +1,27 @@
+{
+  "layers": {
+    "place": { "minzoom": 0, "maxzoom": 12 },
+    "transportation": { "minzoom": 4, "maxzoom": 12, "simplify_below": 11, "simplify_level": 0.0002 },
+    "waterway": { "minzoom": 7, "maxzoom": 12, "simplify_below": 11, "simplify_level": 0.0002 },
+    "water": { "minzoom": 5, "maxzoom": 12, "simplify_below": 11, "simplify_level": 0.0002 },
+    "landuse": { "minzoom": 7, "maxzoom": 12, "simplify_below": 11, "simplify_level": 0.0002 },
+    "landcover": { "minzoom": 5, "maxzoom": 10, "simplify_below": 9, "simplify_level": 0.0005 }
+  },
+  "settings": {
+    "minzoom": 0,
+    "maxzoom": 12,
+    "basezoom": 12,
+    "include_ids": false,
+    "combine_below": 12,
+    "name": "India Offline GPS Map",
+    "version": "1.0",
+    "description": "Offline India basemap derived from OpenStreetMap data",
+    "compress": "gzip",
+    "filemetadata": {
+      "tilejson": "2.0.0",
+      "scheme": "xyz",
+      "type": "baselayer",
+      "format": "pbf"
+    }
+  }
+}
